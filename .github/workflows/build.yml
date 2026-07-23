@@ -1,0 +1,63 @@
+name: duchamp
+
+on: 
+  workflow_dispatch:
+  
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps: 
+    - name: Checkout Kernel Source Code
+      uses: actions/checkout@v4
+      with:
+        github-server-url: 'https://github.com'
+        repository: Acelove12580/12580
+        ref: base
+        path: android-kernel
+
+    - name: Setup Build Environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ccache gh bc bison flex libssl-dev libelf-dev dwarves cpio python-is-python3
+
+    - name: Download Clang Toolchain and Generate Configuration
+      run: |
+        mkdir Clang
+        cd Clang
+        wget -q https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/30062026/neutron-clang-30062026.tar.zst -O Clang.tar.zst
+        tar -I zstd -xf Clang.tar.zst
+        echo "CLANG_DIR=$(pwd)" >> $GITHUB_ENV
+        cd ../android-kernel 
+        echo "KERNEL_DIR=$(pwd)" >> $GITHUB_ENV
+        echo "ZIMAGE_DIR=$(pwd)/out/arch/arm64/boot" >> $GITHUB_ENV
+
+    - name: Generate Kernel Configuration
+      run: |
+        cd android-kernel
+        export PATH=${{ env.CLANG_DIR }}/bin:$PATH
+        KERNEL_DEFCONFIG=gki_defconfig
+        sed -i 's/echo "+"/# echo "+"/g' scripts/setlocalversion
+        make $KERNEL_DEFCONFIG O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+
+    - name: Build Kernel
+      run: |
+        cd android-kernel
+        export PATH=${{ env.CLANG_DIR }}/bin:$PATH
+        export KCFLAGS="-w"
+        export KBUILD_BUILD_USER="Acelove12580"
+        export KBUILD_BUILD_HOST="GKI-Duchamp"  
+        make -j$(nproc --all) O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+
+    - name: ZIP Kernel
+      run: |
+        cd android-kernel
+        cp -fp ${{ env.ZIMAGE_DIR }}/Image anykernel
+        TIME=$(TZ=Asia/Shanghai date "+%H%M")
+        echo "ZIMAGE_NAME=Duchamp-"$TIME >> $GITHUB_ENV
+        rm -rf out
+
+    - name: Upload Kernel Image ZIP
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ZIMAGE_NAME }}
+        path: android-kernel/anykernel/*
